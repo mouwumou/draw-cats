@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+
+.DS_Store
+
+*.pth
+data/processed
+data/data
+data/artistic_cats
+data/paired_artistic_cats
+data/paired_real_cats
+data/real_cats
+
+checkpoints*/
+results*/
+logs/
