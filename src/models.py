@@ -38,7 +38,7 @@ def pix2pix_forward(batch, models, criteria, cfg, device):
     # GAN
     fake_B = G(real)
     pred_fake = D(real, fake_B)
-    loss_GAN = criteria['gan'](pred_fake, torch.ones_like(pred_fake))
+    loss_GAN = criteria['gan'](pred_fake, torch.ones_like(pred_fake)) * cfg.lambda_gan
     loss_L1 = criteria['recon'](fake_B, fake) * cfg.lambda_l1
     # perceptual loss
     real_n = (real + 1) / 2

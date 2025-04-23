@@ -19,6 +19,7 @@ class Config:
     checkpoint_dir: str
     resume: str
     lambda_perc: float   # 新增感知损失权重
+    lambda_gan: float
 
     @staticmethod
     def from_args(args):
@@ -41,4 +42,5 @@ class Config:
             checkpoint_dir=args.checkpoint_dir,
             resume=args.resume,
             lambda_perc=args.lambda_perc,
+            lambda_gan=args.lambda_gan,
         )
