@@ -93,7 +93,7 @@ def train(cfg):
         if val_samples is not None:
             if cfg.mode == 'pix2pix':
                 with torch.no_grad():
-                    G_AB, _, _, _ = models
+                    G_AB, _, _ = models
                     fake_out = G_AB(val_real)
                     # Denormalize images from [-1,1] to [0,1]
                     imgs = torch.cat([val_real, fake_out, val_fake], dim=0)

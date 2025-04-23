@@ -3,6 +3,7 @@ from torch import nn
 from model.pix2pix import UNetGenerator, PatchGANDiscriminator, ResNetGenerator
 from model.pix2pix_stn import UNetWithSTN
 from model.generator import Generator as ResnetGenerator
+from model.attnResnetGenerator import AttnResNetGenerator
 from model.discriminator import Discriminator as PatchDiscriminator
 
 from torchvision.models import vgg19
@@ -40,7 +41,7 @@ class StyleLoss(nn.Module):
 def make_models_and_losses(cfg, device):
     if cfg.mode == 'pix2pix':
         # G = UNetGenerator().to(device)
-        G = UNetWithSTN().to(device)
+        G = AttnResNetGenerator().to(device)
         D = PatchGANDiscriminator().to(device)
         criterion_GAN = nn.MSELoss()
         criterion_recon = nn.L1Loss()
