@@ -26,11 +26,22 @@ def train(cfg):
 
     # DataLoader
     train_loader = make_dataloader(cfg, split='train', pin_memory=True)
-    val_loader = make_dataloader(cfg, split='val') if cfg.mode == 'pix2pix' else None
+    # val_loader = make_dataloader(cfg, split='val')
+    if cfg.mode == 'pix2pix':
+        val_loader = make_dataloader(cfg, split='val')
+        val_samples = next(iter(val_loader))
+        val_real = val_samples['real'].to(device)
+        val_fake = val_samples['fake'].to(device)
+    else:
+        val_loader = make_dataloader(cfg, split='val', pin_memory=True)
+        val_samples = next(iter(val_loader))
+        # val_samples is a tuple (real_A_batch, real_B_batch)
+        val_real_A = val_samples[0].to(device)
+        val_real_B = val_samples[1].to(device)
 
     # Models & Losses
     models, criteria = make_models_and_losses(cfg, device)
-    G = models[0] if cfg.mode == 'pix2pix' else models[0]
+    # G = models[0] if cfg.mode == 'pix2pix' else models[0]
 
     # Optimizers & Scheduler
     optimizers = []
@@ -49,12 +60,6 @@ def train(cfg):
     if cfg.resume and os.path.isfile(cfg.resume):
         models, optimizers, start_epoch = load_checkpoint(cfg.resume, models, optimizers, device)
 
-    # Fixed validation samples for visualization
-    val_samples = None
-    if val_loader:
-        val_samples = next(iter(val_loader))
-        val_real = val_samples['real'].to(device)
-        val_fake = val_samples['fake'].to(device)
         
     global_step = 0
     # Training Loop
@@ -86,12 +91,25 @@ def train(cfg):
 
         # Visualization: write sample images at end of each epoch
         if val_samples is not None:
-            with torch.no_grad():
-                fake_out = G(val_real)
-                # Denormalize images from [-1,1] to [0,1]
-                imgs = torch.cat([val_real, fake_out, val_fake], dim=0)
-                imgs = (imgs + 1) / 2
-                writer.add_images('samples/real_fake_gt', imgs, epoch, dataformats='NCHW')
+            if cfg.mode == 'pix2pix':
+                with torch.no_grad():
+                    G_AB, _, _, _ = models
+                    fake_out = G_AB(val_real)
+                    # Denormalize images from [-1,1] to [0,1]
+                    imgs = torch.cat([val_real, fake_out, val_fake], dim=0)
+                    imgs = (imgs + 1) / 2
+                    writer.add_images('samples/real_fake_gt', imgs, epoch, dataformats='NCHW')
+            else:
+                with torch.no_grad():
+                    G_AB, G_BA, _, _, _ = models
+                    fake_B = G_AB(val_real_A)
+                    rec_A = G_BA(fake_B)
+                    fake_A = G_BA(val_real_B)
+                    rec_B = G_AB(fake_A)
+                    imgs = torch.cat([val_real_A, fake_B, rec_A,
+                                    val_real_B, fake_A, rec_B], dim=0)
+                    imgs = (imgs + 1) / 2
+                    writer.add_images('samples/cyclegan/A2B2A__B2A2B', imgs, epoch, dataformats='NCHW')
 
         # Step scheduler
         scheduler.step()
@@ -117,6 +135,8 @@ if __name__ == '__main__':
     parser.add_argument('--lambda_perc', type=float, default=1.0)
     parser.add_argument('--lambda_gan',  type=float, default=1.0,
                                         help='weight for GAN loss')
+    parser.add_argument('--lambda_style', type=float, default=1.0,
+                                        help='weight for style loss')
     parser.add_argument('--img_size', type=int, default=256)
     parser.add_argument('--log_interval', type=int, default=100)
     parser.add_argument('--checkpoint_interval', type=int, default=5)

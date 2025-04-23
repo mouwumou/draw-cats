@@ -22,7 +22,7 @@ class ResidualBlock(nn.Module):
 
 class Generator(nn.Module):
     """Generator network for style transfer"""
-    def __init__(self, input_channels=3, output_channels=3, n_residual_blocks=9, ngf=64):
+    def __init__(self, input_channels=3, output_channels=3, n_residual_blocks=4, ngf=64):
         super(Generator, self).__init__()
         
         # Initial convolution block

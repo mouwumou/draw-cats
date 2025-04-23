@@ -20,6 +20,7 @@ class Config:
     resume: str
     lambda_perc: float   # 新增感知损失权重
     lambda_gan: float
+    lambda_style: float
 
     @staticmethod
     def from_args(args):
@@ -43,4 +44,5 @@ class Config:
             resume=args.resume,
             lambda_perc=args.lambda_perc,
             lambda_gan=args.lambda_gan,
+            lambda_style=args.lambda_style,
         )

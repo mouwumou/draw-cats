@@ -1,22 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.nn.utils import spectral_norm
-import torchvision.models as models
-
-class VGGFeatureExtractor(nn.Module):
-    def __init__(self, device='cuda'):
-        super().__init__()
-        vgg19 = models.vgg19(pretrained=True).features.to(device)
-        # take the first 21 layers for feature extraction
-        self.slice = nn.Sequential(*[vgg19[i] for i in range(21)])
-        for p in self.slice.parameters():
-            p.requires_grad = False
-
-    def forward(self, x):
-        # VGG takes 3 channels [0,1] input, we assume the model output is also normalized to [-1,1] and then mapped back to [0,1]
-        return self.slice(x)
-
 
 # class UNetGenerator(nn.Module):
 #     def __init__(self, input_channels=3, output_channels=3, ngf=64, use_dropout=True):
