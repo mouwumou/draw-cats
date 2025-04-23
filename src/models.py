@@ -1,13 +1,15 @@
 import torch
 from torch import nn
-from model.pix2pix import UNetGenerator, PatchGANDiscriminator, VGGFeatureExtractor
+from model.pix2pix import UNetGenerator, PatchGANDiscriminator, VGGFeatureExtractor, ResNetGenerator
+from model.pix2pix_stn import UNetWithSTN
 from model.generator import Generator as ResnetGenerator
 from model.discriminator import Discriminator as PatchDiscriminator
 
 
 def make_models_and_losses(cfg, device):
     if cfg.mode == 'pix2pix':
-        G = UNetGenerator().to(device)
+        # G = UNetGenerator().to(device)
+        G = UNetWithSTN().to(device)
         D = PatchGANDiscriminator().to(device)
         criterion_GAN = nn.MSELoss()
         criterion_recon = nn.L1Loss()
