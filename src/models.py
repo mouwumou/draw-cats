@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from model.pix2pix import UNetGenerator, PatchGANDiscriminator
+from model.pix2pix import UNetGenerator, PatchGANDiscriminator, VGGFeatureExtractor
 from model.generator import Generator as ResnetGenerator
 from model.discriminator import Discriminator as PatchDiscriminator
 
@@ -11,8 +11,11 @@ def make_models_and_losses(cfg, device):
         D = PatchGANDiscriminator().to(device)
         criterion_GAN = nn.MSELoss()
         criterion_recon = nn.L1Loss()
-        models = (G, D)
-        criteria = {'gan': criterion_GAN, 'recon': criterion_recon}
+        # add perceptual loss
+        perc_extractor = VGGFeatureExtractor(device).to(device)
+        criterion_perc = nn.L1Loss()
+        models = (G, D, perc_extractor)
+        criteria = {'gan': criterion_GAN, 'recon': criterion_recon, 'perc': criterion_perc}
     else:
         G_AB = ResnetGenerator().to(device)
         G_BA = ResnetGenerator().to(device)
@@ -29,7 +32,7 @@ def make_models_and_losses(cfg, device):
 
 
 def pix2pix_forward(batch, models, criteria, cfg, device):
-    G, D = models
+    G, D, vgg = models
     real = batch['real'].to(device)
     fake = batch['fake'].to(device)
     # GAN
@@ -37,12 +40,31 @@ def pix2pix_forward(batch, models, criteria, cfg, device):
     pred_fake = D(real, fake_B)
     loss_GAN = criteria['gan'](pred_fake, torch.ones_like(pred_fake))
     loss_L1 = criteria['recon'](fake_B, fake) * cfg.lambda_l1
+    # perceptual loss
+    real_n = (real + 1) / 2
+    fake_n = (fake_B + 1) / 2
+    # make sure the input to VGG is 3 channels
+    if real_n.shape[1] == 1:
+        real_n = real_n.repeat(1, 3, 1, 1)
+        fake_n = fake_n.repeat(1, 3, 1, 1)
+    # extract VGG features and calculate perceptual loss
+    feat_real = vgg(real_n)
+    feat_fake = vgg(fake_n)
+    loss_perc = criteria['perc'](feat_fake, feat_real) * cfg.lambda_perc
+
     # Disc
     pred_real = D(real, fake)
     loss_D_real = criteria['gan'](pred_real, torch.ones_like(pred_real))
     pred_fake_det = D(real, fake_B.detach())
     loss_D_fake = criteria['gan'](pred_fake_det, torch.zeros_like(pred_fake_det))
-    losses = {'G_GAN': loss_GAN, 'G_L1': loss_L1, 'D_real': loss_D_real, 'D_fake': loss_D_fake}
+
+    losses = {
+        'G_GAN':  loss_GAN,
+        'G_L1':   loss_L1,
+        'G_perc': loss_perc,
+        'D_real': loss_D_real,
+        'D_fake': loss_D_fake
+    }
     return losses
 
 

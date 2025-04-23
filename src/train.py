@@ -97,6 +97,7 @@ if __name__ == '__main__':
     parser.add_argument('--lambda_l1', type=float, default=100.0)
     parser.add_argument('--lambda_cyc', type=float, default=10.0)
     parser.add_argument('--lambda_id', type=float, default=5.0)
+    parser.add_argument('--lambda_perc', type=float, default=1.0)
     parser.add_argument('--img_size', type=int, default=256)
     parser.add_argument('--log_interval', type=int, default=100)
     parser.add_argument('--checkpoint_interval', type=int, default=5)
