@@ -29,7 +29,13 @@ def train(cfg):
     # val_loader = make_dataloader(cfg, split='val')
     if cfg.mode == 'pix2pix':
         val_loader = make_dataloader(cfg, split='val')
-        val_samples = next(iter(val_loader))
+        # take max 8 samples from val_loader
+        val_samples = next(iter(val_loader)) 
+        # only keep the first 8 samples if len(val_samples) > 8
+        if len(val_samples['real']) > 8:
+            val_samples['real'] = val_samples['real'][:8]
+            val_samples['fake'] = val_samples['fake'][:8]
+        # val_samples is a dict {'real': real_A_batch, 'fake': real_B_batch}
         val_real = val_samples['real'].to(device)
         val_fake = val_samples['fake'].to(device)
     else:

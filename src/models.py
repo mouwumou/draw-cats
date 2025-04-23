@@ -86,17 +86,28 @@ def pix2pix_forward(batch, models, criteria, cfg, device):
     pred_fake = D(real, fake_B)
     loss_GAN = criteria['gan'](pred_fake, torch.ones_like(pred_fake)) * cfg.lambda_gan
     loss_L1 = criteria['recon'](fake_B, fake) * cfg.lambda_l1
-    # perceptual loss
-    real_n = (real + 1) / 2
-    fake_n = (fake_B + 1) / 2
-    # make sure the input to VGG is 3 channels
-    if real_n.shape[1] == 1:
-        real_n = real_n.repeat(1, 3, 1, 1)
-        fake_n = fake_n.repeat(1, 3, 1, 1)
-    # extract VGG features and calculate perceptual loss
-    feat_real = vgg(real_n)
-    feat_fake = vgg(fake_n)
-    loss_perc = criteria['perc'](feat_fake, feat_real) * cfg.lambda_perc
+    # # perceptual loss
+    # real_n = (real + 1) / 2
+    # fake_n = (fake_B + 1) / 2
+    # # make sure the input to VGG is 3 channels
+    # if real_n.shape[1] == 1:
+    #     real_n = real_n.repeat(1, 3, 1, 1)
+    #     fake_n = fake_n.repeat(1, 3, 1, 1)
+    # # extract VGG features and calculate perceptual loss
+    # feat_real = vgg(real_n)
+    # feat_fake = vgg(fake_n)
+    # loss_perc = criteria['perc'](feat_fake, feat_real) * cfg.lambda_perc
+
+    target_n = (fake + 1)  / 2   # 真值彩色图
+    fake_n   = (fake_B + 1) / 2  # 生成彩色图
+
+    if target_n.shape[1] == 1:
+        target_n = target_n.repeat(1, 3, 1, 1)
+        fake_n   = fake_n.repeat(1, 3, 1, 1)
+
+    feat_t  = vgg(target_n)
+    feat_f  = vgg(fake_n)
+    loss_perc = criteria['perc'](feat_f, feat_t) * cfg.lambda_perc
 
     # Disc
     pred_real = D(real, fake)
