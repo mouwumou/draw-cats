@@ -13,6 +13,8 @@ from src.utils import save_checkpoint, load_checkpoint, init_logging
 
 def train(cfg):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    if torch.cuda.is_available():
+        torch.backends.cudnn.benchmark = True
 
     # 保存初始和目标权重
     start_gan   = cfg.lambda_gan      # 默认 1.0
@@ -23,7 +25,7 @@ def train(cfg):
     end_perc    = 5.0                 # 末期升到 5
 
     # DataLoader
-    train_loader = make_dataloader(cfg, split='train')
+    train_loader = make_dataloader(cfg, split='train', pin_memory=True)
     val_loader = make_dataloader(cfg, split='val') if cfg.mode == 'pix2pix' else None
 
     # Models & Losses

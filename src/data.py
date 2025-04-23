@@ -1,3 +1,4 @@
+import torch
 from torchvision import transforms
 from torch.utils.data import DataLoader, Dataset
 from torchvision.transforms import functional as F
@@ -21,39 +22,53 @@ class Pix2PixDataset(Dataset):
         self.geo = transforms.Compose([
             transforms.Resize((img_size, img_size * 2)),
         ])
-        # color jitter only on input
-        self.color_jitter = transforms.ColorJitter(0.2, 0.2, 0.2, 0.1)
+        # color jitter on input and weaker jitter on target
+        self.real_jitter = transforms.ColorJitter(0.2, 0.2, 0.2, 0.1)
+        self.fake_jitter = transforms.ColorJitter(0.05, 0.05, 0.05, 0.02)
         # final to tensor & normalize
         self.to_tensor = transforms.ToTensor()
         self.norm = transforms.Normalize((0.5,) * 3, (0.5,) * 3)
+        # random erasing on input tensor
+        self.random_erasing = transforms.RandomErasing(p=0.5, scale=(0.02, 0.1), ratio=(0.3, 3.3), value='random')
+
 
     def __len__(self):
         return len(self.files)
 
     def __getitem__(self, idx):
         img = Image.open(self.files[idx]).convert('RGB')
-        # geometric
         img = self.geo(img)
-        # split
-        w, h = img.size
-        real_img = img.crop((0, 0, w // 2, h))
-        fake_img = img.crop((w // 2, 0, w, h))
+        w,h = img.size
+        real_img = img.crop((0,0,w//2,h))
+        fake_img= img.crop((w//2,0,w,h))
 
-        if self.split == 'train':
-            # same random flip/rotate
-            if random.random() < 0.5:
-                real_img = F.hflip(real_img)
-                fake_img = F.hflip(fake_img)
-            angle = random.uniform(-10, 10)
-            real_img = F.rotate(real_img, angle)
-            fake_img = F.rotate(fake_img, angle)
-            # color jitter on real only
-            real_img = self.color_jitter(real_img)
-
-        # to tensor & normalize
+        if self.split=='train':
+            # 1) 随机裁剪
+            i,j,h0,w0 = transforms.RandomResizedCrop.get_params(
+                real_img, scale=(0.8,1.0), ratio=(0.9,1.1))
+            real_img = F.resized_crop(real_img,i,j,h0,w0,(self.img_size,self.img_size))
+            fake_img= F.resized_crop(fake_img,i,j,h0,w0,(self.img_size,self.img_size))
+            # 2) 翻转/旋转
+            if random.random()<0.5:
+                real_img, fake_img = F.hflip(real_img), F.hflip(fake_img)
+            ang = random.uniform(-10,10)
+            real_img, fake_img = F.rotate(real_img,ang), F.rotate(fake_img,ang)
+            # 3) 色彩抖动
+            real_img = self.real_jitter(real_img)
+            fake_img= self.fake_jitter(fake_img)
+        
+        # ToTensor & Normalize
         real = self.norm(self.to_tensor(real_img))
-        fake = self.norm(self.to_tensor(fake_img))
-        return {'real': real, 'fake': fake}
+        fake= self.norm(self.to_tensor(fake_img))
+
+        if self.split=='train':
+            # 4) RandomErasing + GaussianNoise
+            real = self.random_erasing(real)
+            real = real + torch.randn_like(real)*0.02
+            real = real.clamp(-1,1)
+
+        return {'real':real, 'fake':fake}
+    
 
 class UnpairedDataset(Dataset):
     """
@@ -97,7 +112,7 @@ class PairedUnpairedDataset(Dataset):
         return self.dsA[idx], self.dsB[idx]
 
 
-def make_dataloader(cfg, split='train'):
+def make_dataloader(cfg, split='train', pin_memory=False):
     shuffle = split == 'train'
     drop_last = split == 'train'
     if cfg.mode == 'pix2pix':
@@ -113,6 +128,7 @@ def make_dataloader(cfg, split='train'):
         dataset, 
         batch_size=cfg.batch_size,
         shuffle=shuffle,
-        num_workers=getattr(cfg, 'num_workers', 4),
-        drop_last=drop_last
+        num_workers=getattr(cfg, 'num_workers', 8),
+        drop_last=drop_last, 
+        pin_memory=pin_memory,
     )
