@@ -1,48 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-class STN(nn.Module):
-    """
-    Spatial Transformer Network 前端：
-      - localization net 预测仿射参数 θ
-      - grid_sample 对输入做仿射变换对齐
-    """
-    def __init__(self, in_channels=3):
-        super().__init__()
-        # localization 网络：简单卷积 + 池化
-        self.localization = nn.Sequential(
-            nn.Conv2d(in_channels, 8, kernel_size=7, padding=3),
-            nn.MaxPool2d(2, stride=2),
-            nn.ReLU(True),
-            nn.Conv2d(8, 10, kernel_size=5, padding=2),
-            nn.MaxPool2d(2, stride=2),
-            nn.ReLU(True)
-        )
-        # 全连接回归仿射参数 6 个数
-        # 假设输入 256x256 -> localization 输出 (10, 64, 64) -> flatten 10*64*64
-        self.fc_loc = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(10 * 64 * 64, 32),
-            nn.ReLU(True),
-            nn.Linear(32, 6)
-        )
-        # 初始化成单位仿射：θ = [1,0,0;0,1,0]
-        self.fc_loc[3].weight.data.zero_()
-        self.fc_loc[3].bias.data.copy_(torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float))
-
-    def forward(self, x):
-        # x: (B, C, H, W)
-        xs = self.localization(x)
-        theta = self.fc_loc(xs)         # (B, 6)
-        theta = theta.view(-1, 2, 3)    # (B, 2, 3)
-        # 生成采样网格
-        grid = F.affine_grid(theta, x.size(), align_corners=True)
-        # 对输入做仿射变换
-        x_trans = F.grid_sample(x, grid, align_corners=True, padding_mode='border')
-        return x_trans
-
-
+from .STN import STN
 
 class PatchEmbedding(nn.Module):
     """
@@ -52,7 +11,11 @@ class PatchEmbedding(nn.Module):
     def __init__(self, in_ch=3, embed_dim=512, patch_size=16):
         super().__init__()
         self.patch_size = patch_size
-        self.proj = nn.Conv2d(in_ch, embed_dim, kernel_size=patch_size, stride=patch_size)
+        # self.proj = nn.Conv2d(in_ch, embed_dim, kernel_size=patch_size, stride=patch_size)
+        self.proj = nn.Conv2d(in_ch, embed_dim,
+                            kernel_size=patch_size + 1,   # 17
+                            stride=patch_size,            # 16
+                            padding=patch_size // 2)      # 8
 
     def forward(self, x):
         # x: [B, C, H, W]
@@ -60,6 +23,32 @@ class PatchEmbedding(nn.Module):
         B, E, H, W = x.shape
         x = x.flatten(2).transpose(1, 2)  # [B, N, E], N=H*W
         return x, (H, W)
+
+class ResidualBlock(nn.Module):
+    def __init__(self, ch):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Conv2d(ch, ch, 3, padding=1, bias=False),
+            nn.InstanceNorm2d(ch),
+            nn.ReLU(True),
+            nn.Conv2d(ch, ch, 3, padding=1, bias=False),
+            nn.InstanceNorm2d(ch)
+        )
+    def forward(self, x):
+        return x + self.block(x)
+
+class UpBlock(nn.Module):
+    def __init__(self, in_ch, out_ch):
+        super().__init__()
+        self.up = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode='nearest'),
+            nn.Conv2d(in_ch, out_ch, 3, padding=1, bias=False),
+            nn.InstanceNorm2d(out_ch),
+            nn.ReLU(True),
+            ResidualBlock(out_ch)          # 1×ResBlock 增细节
+        )
+    def forward(self, x): return self.up(x)
+
 
 class TransformerEncoderBlock(nn.Module):
     def __init__(self, embed_dim=512, num_heads=8, mlp_ratio=4.0, dropout=0.1):
@@ -112,22 +101,13 @@ class ViTGenerator(nn.Module):
             for _ in range(depth)
         ])
         self.norm = nn.LayerNorm(embed_dim)
-        # Enhanced decoder
-        self.decoder = nn.Sequential(
-            # Unflatten to spatial
-            nn.ConvTranspose2d(embed_dim, embed_dim // 2,
-                               kernel_size=patch_size,
-                               stride=patch_size),  # [B, E/2, H, W]
-            nn.GroupNorm(1, embed_dim // 2),
-            nn.ReLU(True),
-            # Additional conv layers for richer decoding
-            nn.Conv2d(embed_dim // 2, embed_dim // 4, kernel_size=3, padding=1, bias=False),
-            nn.GroupNorm(1, embed_dim // 4),
-            nn.ReLU(True),
-            nn.Conv2d(embed_dim // 4, embed_dim // 4, kernel_size=3, padding=1, bias=False),
-            nn.GroupNorm(1, embed_dim // 4),
-            nn.ReLU(True),
-            nn.Conv2d(embed_dim // 4, out_ch, kernel_size=3, padding=1),
+        self.up1 = UpBlock(embed_dim,      embed_dim // 2)   # 16→32
+        self.up2 = UpBlock(embed_dim // 2, embed_dim // 4)   # 32→64
+        self.up3 = UpBlock(embed_dim // 4, embed_dim // 8)   # 64→128
+        self.up4 = UpBlock(embed_dim // 8, embed_dim // 16)  # 128→256
+
+        self.to_rgb = nn.Sequential(
+            nn.Conv2d(embed_dim // 16, out_ch, 3, padding=1),
             nn.Tanh()
         )
 
@@ -145,7 +125,12 @@ class ViTGenerator(nn.Module):
         x = x.transpose(0, 1)                # [B, N, E]
         # Unflatten and decode
         B, N, E = x.shape
-        x = x.transpose(1, 2).view(B, E, H, W)
-        x = self.decoder(x)
+        x = x.transpose(1, 2).view(B, E, H, W)  # (B, E, 16, 16)
+
+        x = self.up1(x)   # 32×32
+        x = self.up2(x)   # 64×64
+        x = self.up3(x)   # 128×128
+        x = self.up4(x)   # 256×256
+        x = self.to_rgb(x)
         return x
 

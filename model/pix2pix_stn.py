@@ -123,3 +123,89 @@ class UNetWithSTN(nn.Module):
 
         # 5. 输出
         return self.final(d4)
+    
+
+class UNetGenerator(nn.Module):
+    def __init__(self, in_channels=3, out_channels=3, base_filters=64):
+        super().__init__()
+        self.stn = STN(in_channels)
+        # 下采样：Conv + InstanceNorm + ReLU
+        def down_block(ch_in, ch_out):
+            return nn.Sequential(
+                nn.Conv2d(ch_in, ch_out, kernel_size=4, stride=2, padding=1, bias=False),
+                nn.InstanceNorm2d(ch_out),
+                nn.LeakyReLU(0.2, inplace=True)
+            )
+
+        # 上采样：Upsample + Conv + InstanceNorm + ReLU
+        def up_block(ch_in, ch_out, use_dropout=False):
+            layers = [
+                nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True),
+                nn.Conv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=False),
+                nn.InstanceNorm2d(ch_out),
+                nn.ReLU(True)
+            ]
+            if use_dropout:
+                layers.insert(-1, nn.Dropout(0.5))
+            return nn.Sequential(*layers)
+
+        # 编码器
+        self.enc1 = down_block(in_channels,  base_filters)       # 128
+        self.enc2 = down_block(base_filters, base_filters*2)     # 64
+        self.enc3 = down_block(base_filters*2, base_filters*4)   # 32
+        self.enc4 = down_block(base_filters*4, base_filters*8)   # 16
+        self.enc5 = down_block(base_filters*8, base_filters*8)   # 8
+        self.enc6 = down_block(base_filters*8, base_filters*8)   # 4
+        self.enc7 = down_block(base_filters*8, base_filters*8)   # 2
+        # self.enc8 = down_block(base_filters*8, base_filters*8)   # 1
+        self.enc8 = nn.Conv2d(
+            base_filters*8, base_filters*8,
+            kernel_size=4, stride=2, padding=1, bias=False
+        )
+
+        # 解码器
+        self.dec1 = up_block(base_filters*8, base_filters*8, use_dropout=True)
+        self.dec2 = up_block(base_filters*16, base_filters*8, use_dropout=True)
+        self.dec3 = up_block(base_filters*16, base_filters*8, use_dropout=True)
+        self.dec4 = up_block(base_filters*16, base_filters*8)
+        self.dec5 = up_block(base_filters*16, base_filters*4)
+        self.dec6 = up_block(base_filters*8,  base_filters*2)
+        self.dec7 = up_block(base_filters*4,  base_filters)
+        # 最后一层上采样后直接输出
+        self.final = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True),
+            nn.Conv2d(base_filters*2, out_channels, kernel_size=3, stride=1, padding=1),
+            nn.Tanh()
+        )
+
+    def forward(self, x):
+        x = self.stn(x)
+        # 编码
+        e1 = self.enc1(x)
+        e2 = self.enc2(e1)
+        e3 = self.enc3(e2)
+        e4 = self.enc4(e3)
+        e5 = self.enc5(e4)
+        e6 = self.enc6(e5)
+        e7 = self.enc7(e6)
+        e8 = self.enc8(e7)
+
+        r8 = e8
+
+        # 解码 + 跳跃连接
+        d1 = self.dec1(r8)
+        d1 = torch.cat([d1, e7], dim=1)
+        d2 = self.dec2(d1)
+        d2 = torch.cat([d2, e6], dim=1)
+        d3 = self.dec3(d2)
+        d3 = torch.cat([d3, e5], dim=1)
+        d4 = self.dec4(d3)
+        d4 = torch.cat([d4, e4], dim=1)
+        d5 = self.dec5(d4)
+        d5 = torch.cat([d5, e3], dim=1)
+        d6 = self.dec6(d5)
+        d6 = torch.cat([d6, e2], dim=1)
+        d7 = self.dec7(d6)
+        d7 = torch.cat([d7, e1], dim=1)
+
+        return self.final(d7)

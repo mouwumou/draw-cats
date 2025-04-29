@@ -26,6 +26,9 @@ def train(cfg):
 
     # DataLoader
     train_loader = make_dataloader(cfg, split='train', pin_memory=True)
+    train_samples = next(iter(train_loader))
+    train_sample_real = train_samples['real'].to(device) if cfg.mode == 'pix2pix' else train_samples[0].to(device)
+    train_sample_fake = train_samples['fake'].to(device) if cfg.mode == 'pix2pix' else train_samples[1].to(device)
     # val_loader = make_dataloader(cfg, split='val')
     if cfg.mode == 'pix2pix':
         val_loader = make_dataloader(cfg, split='val')
@@ -72,7 +75,7 @@ def train(cfg):
     for epoch in range(start_epoch, cfg.n_epochs + 1):
         # ——— 动态权重更新 ———
         frac = (epoch - 1) / (cfg.n_epochs - 1)  # 0→1
-        cfg.lambda_gan  = start_gan   * (1 - frac) + end_gan   * frac
+        cfg.lambda_gan  = start_gan   * (1 - frac) + end_gan   * frac if epoch > 3 else 0 # warming up
         cfg.lambda_l1   = start_l1    * (1 - frac) + end_l1    * frac
         cfg.lambda_perc = start_perc  * (1 - frac) + end_perc  * frac
         print(f"[Epoch {epoch:03d}] λ_gan={cfg.lambda_gan:.3f}, λ_l1={cfg.lambda_l1:.1f}, λ_perc={cfg.lambda_perc:.1f}")
@@ -96,6 +99,15 @@ def train(cfg):
                 logger.log(losses, global_step)
 
         # Visualization: write sample images at end of each epoch
+        if cfg.mode == 'pix2pix':
+            with torch.no_grad():
+                G, _, _ = models
+                fake_B = G(train_sample_real)
+                # Denormalize images from [-1,1] to [0,1]
+                imgs = torch.cat([train_sample_real, fake_B, train_sample_fake], dim=0)
+                imgs = (imgs + 1) / 2
+                writer.add_images('samples/train_real_fake_gt', imgs, epoch, dataformats='NCHW')
+
         if val_samples is not None:
             if cfg.mode == 'pix2pix':
                 with torch.no_grad():
